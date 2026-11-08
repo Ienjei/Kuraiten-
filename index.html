@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="ko"><head><meta charset="UTF-8"><title>Kuraiten</title>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>
+:root{--bg:#f7f7f7;--fg:#111;--card:#fff;--bd:#ccc;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);--s:min(60px,10.4vw)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1c1c1e;--fg:#eee;--card:#2a2a2d;--bd:#555}}
+body{font-family:sans-serif;display:flex;flex-direction:column;align-items:center;background:var(--bg);color:var(--fg);padding:12px;margin:0}
+#st{display:grid;grid-template-columns:1fr auto auto;gap:6px;margin-bottom:6px;width:min(100%,560px)}#mn{min-width:3.5em}#tm{min-width:6em}
+#st div{font-weight:bold;font-size:14px;padding:8px 6px;white-space:nowrap;text-align:center;font-variant-numeric:tabular-nums;border-radius:8px;background:var(--card);border:1px solid var(--bd);color:#000}
+.sub{font-size:12px;opacity:.7;margin:4px 0;height:2.8em;overflow:hidden;text-align:center;width:min(100%,560px)}h2{margin:4px 0 8px}body{overflow-anchor:none}
+.ctl{display:flex;gap:6px;margin:8px 0;align-items:center;justify-content:center;height:36px;white-space:nowrap}
+button{padding:7px 11px;font-size:13px;font-weight:bold;cursor:pointer;border-radius:4px;border:1px solid #666;background:#fff;color:#000}
+#board{min-height:calc(var(--s)*9);display:grid;grid-template-columns:repeat(9,var(--s));grid-template-rows:repeat(9,var(--s));border:2px solid #000;background:#000;box-shadow:0 4px 10px rgba(0,0,0,.15)}
+.cell{width:var(--s);height:var(--s);display:flex;align-items:center;justify-content:center;cursor:pointer;position:relative;background:#ffd17A;border:1px solid #000;box-sizing:border-box}
+.ganzier{background:linear-gradient(to bottom,#ffd17A 33.3%,#06f 33.3%,#06f 66.6%,#ffd17A 66.6%)}
+.lukem{background:#006400;border:2px solid #004d00}
+.threatened{background:#ff4d4d!important}
+.highlight::after{content:'';width:30%;height:30%;background:rgba(0,200,0,.7);border-radius:50%;position:absolute;z-index:2}
+.piece{width:73%;height:83%;display:flex;align-items:center;justify-content:center;font-size:calc(var(--s)*.4);font-weight:bold;background:#fffff0;user-select:none;z-index:1;filter:drop-shadow(0 2px 3px rgba(0,0,0,.3))}
+.B{color:#000}.R{color:#be1c1c}
+.up{clip-path:polygon(50% 0,100% 25%,100% 100%,0 100%,0 25%)}
+.down{clip-path:polygon(0 0,100% 0,100% 75%,50% 100%,0 75%)}
+#msg{height:2.8em;line-height:1.4;overflow:hidden;font-size:14px;font-weight:bold;margin:6px 0;text-align:center;width:min(100%,560px)}
+#ov{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);align-items:center;justify-content:center;z-index:9;padding:12px}
+.bx{background:var(--card);color:var(--fg);border-radius:10px;padding:18px;max-width:440px;max-height:85vh;overflow:auto;font-size:14px;line-height:1.5}
+.bt{display:flex;gap:8px;justify-content:center;margin-top:12px}
+input{padding:7px;font-size:16px;width:90px;text-align:center;text-transform:uppercase}
+</style></head><body>
+<h2>Kuraiten</h2>
+<div id="st"><div id="ti"></div><div id="mn"></div><div id="tm"></div></div>
+<div class="sub" id="sub">💡 솔로 플레이에서는 <b>Shift + T</b>로 보드를 뒤집을 수 있습니다.</div>
+<div class="ctl" id="top"></div><div id="board"></div><div class="ctl" id="bot"></div>
+<div id="msg"></div><div id="ov"></div>
+<script>
+/* ▼▼ Firebase 설정: 콘솔에서 복사한 값으로 교체하세요 (databaseURL이 가장 중요) ▼▼ */
+const FB={apiKey:"AIzaSyA6eSv6feadpaBdSXmOHAQPjyCDwDlNe_Q",authDomain:"kuraiten-500d4.firebaseapp.com",databaseURL:"https://kuraiten-500d4-default-rtdb.asia-southeast1.firebasedatabase.app",projectId:"kuraiten-500d4",storageBucket:"kuraiten-500d4.firebasestorage.app",messagingSenderId:"453139712563",appId:"1:453139712563:web:c9e6d425314154399f7146"};
+/* ▲▲ ------------------------------------------------------- ▲▲ */
+const N=9,SYM={T:'ቸ',Z:'ረ',P:'ደ',M:'ጔ',R:'ኆ',G:'ሳ',D:'ተ',Q:'ጀ',K:'ኝ',S:'ሻ'},PRO={Z:'D',P:'Q',M:'K',G:'S'},NAME={B:'Beduxas',R:'Reicana'};
+const D8=[[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[-1,1],[1,-1],[1,1]],opp=p=>p==='B'?'R':'B',inb=(r,c)=>r>=0&&r<N&&c>=0&&c<N;
+let S,mode='solo',me='B',flip=false,sel=null,vm=[],dl=Date.now()+6e5,db=null,rdb=null,uid=null,ref=null,unsub=null,room='',waiting=false,busy=0,first=0,note='';
+function init(){const b=Array.from({length:N},()=>Array(N).fill(null)),k='RMPZTZPMR';
+ for(let c=0;c<N;c++){b[1][c]={t:'G',p:'R',m:0,d:0};b[7][c]={t:'G',p:'B',m:0,d:0};b[0][c]={t:k[c],p:'R',m:0,d:0};b[8][c]={t:k[c],p:'B',m:0,d:0};}
+ return{b,turn:'B',n:0,over:null,v:0};}
+function mv(b,r,c){const x=b[r][c],o=[];if(!x)return o;const f=x.p==='B'?-1:1;
+ const add=(a,e)=>{if(inb(a,e)){const y=b[a][e];if(!y||y.p!==x.p)o.push([a,e]);}};
+ const ray=(ds,mx)=>ds.forEach(([i,j])=>{for(let s=1;s<=mx;s++){const a=r+i*s,e=c+j*s;if(!inb(a,e))break;const y=b[a][e];if(!y)o.push([a,e]);else{if(y.p!==x.p)o.push([a,e]);break;}}});
+ switch(x.t){
+ case'R':ray(D8.slice(0,4),9);break;
+ case'Q':ray(D8.slice(4),9);break;
+ case'K':ray(D8,2);break;
+ case'T':case'D':D8.forEach(([i,j])=>add(r+i,c+j));break;
+ case'M':[[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]].forEach(([i,j])=>add(r+i,c+j));break;
+ case'P':add(r+2*f,c-1);add(r+2*f,c+1);break;
+ case'Z':add(r,c-1);add(r,c+1);add(r+f,c);if(inb(r+f,c)&&!b[r+f][c])add(r+2*f,c);break;
+ case'G':add(r+f,c);if(inb(r+f,c)&&!b[r+f][c]&&!x.m)add(r+2*f,c);break;
+ case'S':[[f,0],[f,-1],[f,1],[-f,-1],[-f,1]].forEach(([i,j])=>add(r+i,c+j));break;}
+ if(r===4&&c===4)[[1,0],[2,0],[1,-1],[2,-2],[1,1],[2,2]].forEach(([i,j])=>{const a=r+f*i,e=c+j;if(!o.some(q=>q[0]===a&&q[1]===e))add(a,e);});
+ return o;}
+function att(b,r,c,p){let n=0;for(let i=0;i<N;i++)for(let j=0;j<N;j++){const x=b[i][j];if(x&&x.p===opp(p)&&mv(b,i,j).some(q=>q[0]===r&&q[1]===c))n++;}return n;}
+function threat(b,r,c,p){const n=att(b,r,c,p);return r===4&&c===4?n>=2:n>0;}
+function find(b,p){for(let i=0;i<N;i++)for(let j=0;j<N;j++)if(b[i][j]&&b[i][j].t==='T'&&b[i][j].p===p)return[i,j];return null;}
+function legal(b,r,c){const x=b[r][c];if(!x)return[];if(r===4&&c===4&&att(b,4,4,x.p)>=2)return[];
+ return mv(b,r,c).filter(([a,e])=>{const y=b[a][e];if(a===4&&e===4&&y&&att(b,4,4,y.p)<2)return false;
+  const nb=b.map(w=>w.slice());nb[a][e]=x;nb[r][c]=null;const k=find(nb,x.p);return !k||!threat(nb,k[0],k[1],x.p);});}
+function hasMoves(b,p){for(let i=0;i<N;i++)for(let j=0;j<N;j++)if(b[i][j]&&b[i][j].p===p&&legal(b,i,j).length)return true;return false;}
+function pinfo(x,tr){const B=x.p==='B',zone=B?tr<=3:tr>=5,last=B?tr===0:tr===8,has=!!PRO[x.t];
+ const force=has&&((x.t!=='M'&&last)||(x.t==='P'&&(B?tr<=1:tr>=7)));return{force,offer:has&&!force&&zone&&!x.d};}
+function apply(s,fr,fc,tr,tc,pro){const b=s.b.map(w=>w.slice()),x={...b[fr][fc]},B=x.p==='B';
+ if(B?tr>=4:tr<=4)x.d=0;
+ const q=pinfo(x,tr);if(q.force||(q.offer&&pro))x.t=PRO[x.t];else if(q.offer)x.d=1;
+ x.m=1;b[fr][fc]=null;b[tr][tc]=x;
+ const t=opp(s.turn),o={b,turn:t,n:s.n+(s.turn==='R'?1:0),over:null,v:s.v+1};
+ if(b.every(w=>w.every(y=>!y||y.t==='T')))o.over={w:null,why:'draw'};else if(!hasMoves(b,t)){const k=find(b,t),chk=k&&threat(b,k[0],k[1],t);o.over={w:s.turn,why:chk?'sgadaiz':'nomove'};}
+ return o;}
+function ask(h,bs){return new Promise(res=>{const o=document.getElementById('ov');o.innerHTML=`<div class="bx">${h}<div class="bt">${bs.map((b,i)=>`<button data-i="${i}">${b}</button>`).join('')}</div></div>`;o.style.display='flex';
+ o.onclick=e=>{const i=e.target.dataset&&e.target.dataset.i;if(i!==undefined&&i!==''){o.style.display='none';res(+i);}};});}
+function commit(ns){S=ns;sel=null;vm=[];dl=Date.now()+6e5;draw();
+ if(mode==='net')ref.update({s:JSON.stringify(ns)}).catch(()=>{note='전송 실패: 인터넷 연결을 확인하세요.';draw();});}
+async function click(r,c){note='';if(S.over||waiting||busy||(mode==='net'&&S.turn!==me))return;
+ const x=S.b[r][c];
+ if(sel&&vm.some(m=>m[0]===r&&m[1]===c)){const[fr,fc]=sel,p=S.b[fr][fc];let pro=false;
+  if(pinfo(p,r).offer){busy=1;pro=(await ask(`idexunt 구역에 진입했습니다.<br>${SYM[p.t]} → ${SYM[PRO[p.t]]} 로 idexunt 하시겠습니까?`,['idexunt','거부']))===0;busy=0;}
+  commit(apply(S,fr,fc,r,c,pro));return;}
+ if(x&&x.p===S.turn){sel=[r,c];vm=legal(S.b,r,c);if(r===4&&c===4&&att(S.b,4,4,x.p)>=2)note='xagucin 상태입니다! 이 기물은 움직일 수 없습니다.';}else{sel=null;vm=[];}
+ draw();}
+async function bos(p){if(S.over||busy)return;busy=1;const i=await ask(`${NAME[p]} 진영이 Bosgal(기권)하시겠습니까?`,['Bosgal','취소']);busy=0;if(i===0)commit({...S,over:{w:opp(p),why:'bosgal'},v:S.v+1});}
+function help(){ask(`<h3>Kuraiten 규칙</h3><b>기물</b><br>ቸ T: 킹 / ኆ R: 룩 / ጔ M: 나이트 / ደ P: 쇼기 계마(뛰어넘기 가능)<br>ረ Z: 좌우 1칸 또는 전진 최대 2칸 / ሳ G: 전진 1칸(첫 수는 2칸)<br>idexunt: ረ→ተ(킹 행마) ደ→ጀ(비숍) ጔ→ኝ(8방향 최대 2칸) ሳ→ሻ(은장)<br><br><b>idexunt</b><br>5번째 가로줄을 넘어 상대 쪽에 들어가면 가능(5번째 줄 위는 해당 없음). 거부했다면 5번째 줄까지(또는 자기 쪽으로) 물렸다가 다시 넘어가야 다시 선택 가능. 한 번 한 idexunt는 되돌릴 수 없음. 더 이동할 칸이 없게 되는 ረ ደ ሳ는 강제 idexunt.<br><br><b>Lukem(중앙)</b><br>그 위의 기물은 잡을 수 없고, 다음 턴부터 앞/앞 대각선 최대 2칸 도약 가능. 상대 기물 2개 이상이 위협하면 xagucin: 이동 불가, 대신 잡을 수 있음.<br><br><b>sga / sgadaiz / Bosgal</b><br>sga(체크)는 자동 표시되며 반드시 해소해야 함. 피할 수 없으면 sgadaiz(체크메이트)로 자동 종료. 체크가 아니어도 둘 수 있는 수가 없으면 그 쪽이 패배하고, 양쪽 왕만 남으면 무승부. Bosgal은 기권. 10분간 수가 없으면 Bosgal 처리.`,['닫기']);}
+function mk(){return Array(5).fill(0).map(()=>'ABCDEFGHJKLMNPQRSTUVWXYZ'[Math.floor(Math.random()*24)]).join('');}
+async function create(){const code=mk(),col=Math.random()<.5?'B':'R';await rdb.ref('games/'+code).set({host:uid,hc:col,s:JSON.stringify(init())});sub(code,col);}
+async function join(code){if(code.length<5)return'방 코드를 입력하세요.';const r=rdb.ref('games/'+code),sn=await r.get();if(!sn.exists())return'방을 찾을 수 없습니다.';
+ const d=sn.val();let col;
+ if(d.host===uid)col=d.hc;else if(!d.guest||d.guest===uid){col=opp(d.hc);if(!d.guest)await r.update({guest:uid});}else return'이미 가득 찬 방입니다.';
+ sub(code,col);return'';}
+function sub(code,col){if(unsub)unsub();mode='net';me=col;room=code;first=1;ref=rdb.ref('games/'+code);
+ const h=sn=>{if(!sn.exists())return;const d=sn.val(),st=JSON.parse(d.s),w=!d.guest;
+  if(first||st.v!==S.v||w!==waiting){S=st;dl=Date.now()+6e5;sel=null;vm=[];}waiting=w;first=0;draw();};ref.on('value',h,()=>{note='동기화 오류';draw();});unsub=()=>ref.off('value',h);
+ S=init();draw();}
+async function lobby(){let ln='';while(1){const i=await ask(`<h3>Kuraiten</h3><p>${db?'다른 컴퓨터와 대전하려면 한 명이 방을 만들고, 상대가 코드를 입력합니다.':'멀티플레이(Firebase) 설정이 아직 되어 있지 않습니다. 솔로 플레이만 가능합니다.'}</p><p style="color:#be1c1c">${ln}</p><input id="cd" placeholder="코드" maxlength="5">`,['솔로 플레이','방 만들기','입장']);
+ const code=document.getElementById('cd').value.toUpperCase().trim();ln='';
+ if(i===0){if(unsub)unsub();unsub=null;mode='solo';waiting=false;flip=false;S=init();dl=Date.now()+6e5;draw();return;}
+ if(!db){ln='사용할 수 없습니다.';continue;}
+ try{if(i===1){await create();return;}ln=await join(code);if(!ln)return;}catch(e){ln='연결 오류: '+(e.message||e.code||e);}}}
+function draw(){const vs=mode==='solo'?(flip?'R':'B'):me,bd=document.getElementById('board');bd.innerHTML='';
+ const ks={};['B','R'].forEach(p=>{const k=find(S.b,p);if(k&&threat(S.b,k[0],k[1],p))ks[k]=1;});
+ const rs=[...Array(N).keys()],cs=rs.slice();if(vs==='R'){rs.reverse();cs.reverse();}
+ rs.forEach(r=>cs.forEach(c=>{const d=document.createElement('div'),x=S.b[r][c];
+  d.className='cell'+(r===4?(c===4?' lukem':' ganzier'):'')+(ks[[r,c]]?' threatened':'')+(vm.some(m=>m[0]===r&&m[1]===c)?' highlight':'');
+  if(x){const p=document.createElement('div');p.className=`piece ${x.p} ${x.p===vs?'up':'down'}`;p.textContent=SYM[x.t];d.appendChild(p);}
+  d.onclick=()=>click(r,c);bd.appendChild(d);}));
+ const ti=document.getElementById('ti');ti.textContent='현재 턴: '+NAME[S.turn]+' 진영'+(S.turn==='B'?' (선공)':'');ti.style.color=S.turn==='B'?'#000':'#be1c1c';
+ document.getElementById('mn').textContent=S.n+'수';
+ const bb=p=>`<b style="color:${p==='B'?'#000':'#be1c1c'}">[${NAME[p]}]</b><button onclick="bos('${p}')">Bosgal</button>`;
+ document.getElementById('top').innerHTML=mode==='solo'?bb(opp(vs)):'';
+ document.getElementById('bot').innerHTML=bb(vs)+'<button onclick="help()">도움말</button><button onclick="lobby()">로비</button>';
+ document.getElementById('sub').textContent=mode==='net'?`방 코드: ${room} · 내 진영: ${NAME[me]}(${me==='B'?'흑':'적'})`:'💡 솔로 플레이에서는 Shift + T로 보드를 뒤집을 수 있습니다.';
+ const W={sgadaiz:'sgadaiz!',bosgal:'Bosgal(기권)',time:'시간 초과(Bosgal 처리)',nomove:'둘 수 있는 수가 없음'};let m=note;
+ if(!m){if(S.over)m=S.over.w?`🎉 ${NAME[S.over.w]} 진영 승리 — ${W[S.over.why]}`:'무승부 (양쪽 왕만 남음)';else if(waiting)m='상대를 기다리는 중… 코드를 알려 주세요: '+room;else if(ks[find(S.b,S.turn)])m='sga!';else if(mode==='net')m=S.turn===me?'당신의 차례입니다.':'상대의 차례입니다.';}
+ document.getElementById('msg').textContent=m;}
+window.addEventListener('keydown',e=>{if(e.shiftKey&&e.key.toLowerCase()==='t'&&mode==='solo'){e.preventDefault();flip=!flip;draw();}});
+setInterval(()=>{const t=document.getElementById('tm');t.style.color='#000';if(S.over||waiting){t.textContent='⏱ --:--';return;}
+ const s=Math.max(0,Math.ceil((dl-Date.now())/1000));t.textContent=`⏱ ${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`;if(!s&&!busy)commit({...S,over:{w:opp(S.turn),why:'time'},v:S.v+1});},500);
+S=init();draw();
+(()=>{try{if(!/YOUR_/.test(FB.databaseURL)){firebase.initializeApp(FB);rdb=firebase.database();db=true;
+ try{uid=localStorage.getItem('kid');}catch(e){}
+ if(!uid){uid=Math.random().toString(36).slice(2)+Date.now().toString(36);try{localStorage.setItem('kid',uid);}catch(e){}}}}catch(e){db=null;}lobby();})();
+</script></body></html>
